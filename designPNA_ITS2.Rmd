@@ -215,7 +215,10 @@ all.aln2 <- seqinr::read.alignment("./data/fITS7_100bp_allCrops_aln.fasta",
                         format = "fasta")
 all.bin2 <- ape::as.DNAbin(all.aln2)
 all.wind2 <- all.bin2[, 1:75]  #perfect all 1:18, perfect except corn 27:49, perfect only Ta+Hv 1:75
+#tiff("./figures/Fig1_cropPNA.tiff", width=7, height=3.25, units="in", res=300)
 ape::image.DNAbin(all.wind2, cex.lab = 0.50, col = dna.col)
+#dev.off()
+
 
 all.aln2 <- readDNAStringSet("./data/fITS7_100bp_allCrops_aln.fasta")  #load in as SS
 all.char <- as.character(all.aln2$Hv[1:75])  
