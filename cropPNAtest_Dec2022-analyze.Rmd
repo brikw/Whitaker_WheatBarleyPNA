@@ -1,0 +1,367 @@
+---
+title: "Test crop PNA Illumina Run Dec2022"
+author: "Briana K. Whitaker"
+date: "`r Sys.Date()`"
+output: html_document
+---
+\fontsize{9}{10}
+---
+
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.width=3.5, fig.height=3,
+                      warning=FALSE, message=FALSE)
+```
+
+
+* Run using `r version[['version.string']] `.
+
+
+# Objective
+This document reports on results from the Illumina Nano Run in Dec 2022, on 40 samples. 1 primer pair only. 3 wheat head, 3 barley head, and 3 corn leaf samples times four PNA treatment levels Plus 2 corn debris samples as positive controls [no plant amplification in previous trials], and two PCR negative controls.
+
+
+# Load Packages, set path to data
+```{r, echo=FALSE, results='hide', include=FALSE} 
+
+x<-c("Biostrings", "car", "genefilter", "MASS",
+    "tidyverse", "ggplot2", "phyloseq", "vegan")
+lapply(x, require, character.only = TRUE)
+
+#Load functions
+source("./code/fxn_blastr-bw.R")
+source("./code/blastn_code.R")
+source("./code/multiplot.function.R")
+
+#add 'not in' function
+`%nin%` = Negate(`%in%`)
+
+#set seed
+set.seed(217)
+
+# set ggplot2 theme
+theme_set(theme_bw(base_size=10)) 
+theme_update(panel.grid.major=element_line(0), panel.grid.minor=element_line(0))
+```
+
+
+```{r, echo=FALSE, results='hide', include=FALSE} 
+
+SbyE <- read.csv("./data/cropPNA_TestIllumina_2022-12-02.csv")
+
+track <- read.csv("./data/cropPNA_TrackSequences.csv", 
+                 row.names = 1)
+SbyS <- read.csv("./data/cropPNA_SbyS.csv", row.names=1)
+
+uniqueSS <- readDNAStringSet("./data/cropPNA_uniqueSeqs.fasta")
+
+rownames(SbyE) <- SbyE$trtID
+SbyE$trtID <- as.factor(SbyE$trtID)
+SbyE$ID <- as.factor(SbyE$ID)
+SbyE$Crop.Type <- as.factor(SbyE$Crop.Type)
+SbyE$PNA_Treatment_Code <- as.factor(SbyE$PNA_Treatment_Code)
+SbyE$PNA_Treatment <- as.factor(SbyE$PNA_Treatment)
+SbyE$Replicate <- as.factor(SbyE$Replicate)
+SbyE$Index_N7XX <- as.factor(SbyE$Index_N7XX)
+SbyE$Index_S5XX <- as.factor(SbyE$Index_S5XX)
+# drop PCRneg 2, as no reads passed filter
+SbyE <- SbyE[SbyE$trtID != "PCRneg-2",]
+
+str(SbyE)
+
+# sanity check, must be true
+identical(sort(rownames(SbyE)), sort(rownames(SbyS)))
+
+
+load("./data/cropPNA_ps_ids.RData")
+ps
+
+conf <- read.csv("./data/cropPNA_decipher_ids_conf.csv", row.names = 1)
+
+
+# add track sequence data to phyloseq obj
+identical(sort(rownames(track)), sort(sample_names(ps))) #must be TRUE
+
+track_ps <- phyloseq(sample_data(track))
+
+ps <- merge_phyloseq(ps, track_ps)
+ps
+
+```
+
+
+
+# Summarize & Remove Plant Reads
+
+### Run hits from DECIPHER with low confidence at Kingdom level on ncbi browser
+```{r, results='hide', echo=FALSE}
+lowConfASVs <- rownames(conf)[conf$k.conf<70]
+
+# lowConfSS <- uniqueSS[names(uniqueSS) %in% lowConfASVs]
+# writeXStringSet(lowConfSS, "./data/cropPNA_uniqueSeqs_lowConfDecipher.fasta")
+lowConfSS <- readDNAStringSet("./data/cropPNA_uniqueSeqs_lowConfDecipher.fasta")
+hist(width(lowConfSS)) 
+range(width(lowConfSS)) #couple short ones too
+```
+
+* ASVs that are low confidence from decipher output are generally longer than average for regular dataset ~50bp
+
+```{r, results='hide'}
+# ##write.csv(lowConfASVs, "./data/cropPNA_lowConfASVs.csv") #manually edited with blast-nr results
+lowConf.ncbi <- read.csv("./data/cropPNA_lowConfASVs.csv", row.names = 1, stringsAsFactors = TRUE)
+
+# table(lowConf.ncbi$Problematic)      # 16 problematic overall
+# table(lowConf.ncbi$NCBI.Blast.Group) # 10 plant (leaving 6 as chimera seqs)
+# table(lowConf.ncbi$NCBI.Blast.ID)    #3 Hordeum, 6 Triticum, 1 Hord/Trit chimera
+```
+
+* Overall 16 residual ASVs that are likely plant or chimera. Rest are Fungi, just weren't determined from DECIPHER matches.
+
+```{r, results='hide', echo=FALSE}
+notFungiASVs <- droplevels(lowConf.ncbi$ASV[lowConf.ncbi$Problematic=="yes"])
+plantASVs <- droplevels(lowConf.ncbi$ASV[lowConf.ncbi$NCBI.Blast.Group=="Plant"])
+
+test <- ps@otu_table@.Data
+
+propPlant <- rowSums(test[,colnames(test) %in% plantASVs])
+ps@sam_data$propPlant <- c(propPlant/rowSums(ps@otu_table))
+
+```
+
+* 3 ASVs were Hordeum, while 6 were Triticum, and 1 was a Triticum-Hordeum chimera of sorts. In addition, 6 ASVs were likely chimeras
+
+
+### subset phyloseq obj
+```{r, echo=FALSE}
+ps_fungi <- ps
+ps_fungi@otu_table <- otu_table(ps)[,colnames(otu_table(ps)) %nin% notFungiASVs]
+ps_fungi@refseq <- refseq(ps_fungi)[names(refseq(ps_fungi)) %nin% notFungiASVs]
+#ps_fungi  #removes the 16 problematic ASVs
+
+# add new seq depth
+ps_fungi@sam_data$seqDepth_noPlant <- rowSums(ps_fungi@otu_table)
+
+#save(ps_fungi, file = "./data/cropPNA_ps_fungi.RData")
+load("./data/cropPNA_ps_fungi.RData")
+ps_fungi
+```
+
+```{r}
+sum(ps_fungi@otu_table['PCRneg-1',])
+#sum(ps@otu_table['PCRneg-1',])
+
+```
+
+* Note, 243 reads in PCRneg1 sample (no reads passed filter for PCRneg2)
+* None of the reads in the PCRneg1 are plant-origin. 
+
+
+### Plots of sequencing and plant contamination
+
+```{r, include=FALSE}
+data.frame(ps_fungi@sam_data@.Data) -> test0
+colnames(test0) <- ps_fungi@sam_data@names
+rownames(test0) <- ps_fungi@sam_data@row.names
+str(test0)
+
+test <- test0 %>% filter(Crop.Type != 'Debris') %>% filter(trtID != 'PCRneg-1')
+test$PNA_Treatment <- factor(test$PNA_Treatment, levels = c("0uM", "0.75uM", "1uM", "1.5uM"))
+
+test %>% droplevels() -> test
+
+```
+
+##### Proportion of sample that is plant reads
+```{r, results='hide', echo=FALSE, fig.width = 6, fig.height=4}
+p1 <- ggplot(test, aes(y = propPlant, x = PNA_Treatment, color = Crop.Type)) +
+  facet_grid(.~Crop.Type) + 
+  geom_violin() + geom_jitter(size = 1.5, width = 0.2) +
+  guides(color = 'none') +
+  scale_x_discrete("PNA Treatment") + 
+  scale_y_continuous("Proportion that are Plant Reads", trans = "sqrt") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+#tiff("./figures/Fig2_cropPNA.tiff", width=3.25, height=3.25, units="in", res=300)
+p1
+#dev.off()
+```
+
+##### Raw Sequencing depth for sample after DADA2, prior plant removal
+```{r, results='hide', echo=FALSE, fig.width = 6, fig.height=4}
+ggplot(test, aes(y = postChimera , x = Crop.Type)) +
+  ylab("raw Seq. Depth") +
+  geom_boxplot() + geom_jitter(size = 3, width = 0.1, aes(color=PNA_Treatment))
+
+ggplot(test, aes(y = postChimera, x = PNA_Treatment, color = Crop.Type)) +
+  facet_grid(.~Crop.Type)+ 
+  ylab("raw Seq. Depth") +
+  geom_violin() + geom_jitter(size = 3, width = 0.1)
+
+```
+
+##### Sequencing depth for sample after plant removal
+```{r, results='hide', echo=FALSE, fig.width = 6, fig.height=4}
+ggplot(test, aes(y = seqDepth_noPlant , x = Crop.Type)) +
+  geom_boxplot() + 
+  geom_jitter(size = 3, width = 0.1, aes(color=PNA_Treatment)) + 
+  ylab("(no Plant) Seq. Depth")
+ggplot(test, aes(y = seqDepth_noPlant, x = PNA_Treatment, color = Crop.Type)) +
+  facet_grid(.~Crop.Type)+ 
+  ylab("(no Plant) Seq. Depth") +
+  geom_violin() + 
+  geom_jitter(size = 3, width = 0.1)
+```
+
+
+* biggest effect from crop type, 
+
+
+### Run Models
+```{r}
+#SbyE <- data.frame(sample_data(ps_fungi))
+
+plant.mod1 <- lm(propPlant ~ Crop.Type*PNA_Treatment, data = test)
+car::Anova(plant.mod1, type = 2)
+
+plant.aov <- aov(propPlant ~ Crop.Type*PNA_Treatment, data = test)
+TukeyHSD(plant.aov, which= "Crop.Type") # across PNA, both corn and wheat diff from barley, but not diff from each other
+TukeyHSD(plant.aov, which= "PNA_Treatment") #across crops, 0uM differnt from any PNA trt (L,M,H), but no other trt level different from one another
+TukeyHSD(plant.aov, which = "Crop.Type:PNA_Treatment")
+
+```
+
+* Both crop type and PNA treatment have an effect on the proportion of plant reads contaminating a sample. 
+#  Barley 0uM worse than any other barley trt (L,M,H), and also barley 0uM worse than all corn and wheat trts (all 0,L,M,H). But, though the wheat 0uM looks higher, it is not statistically different from wheat PNA trts (L,M,H)
+
+```{r}
+raw.mod1 <- lm(postChimera ~ Crop.Type*PNA_Treatment, data = test)
+car::Anova(raw.mod1, type = 2)  # only crop type has an effect on seq depth, not inclusion of the PNA
+
+depth.mod1 <- lm(seqDepth_noPlant ~ Crop.Type*PNA_Treatment, data = test)
+car::Anova(depth.mod1, type = 2)
+#depth.aov <- aov(seqDepth_noPlant ~ Crop.Type*PNA_Treatment, data = test)
+#TukeyHSD(depth.aov, which = "Crop.Type")  #corn diff from barley, but not wheat, wheat not diff from barley
+
+```
+
+* However, only crop type has an effect on the total number of raw reads that pass through the DADA2 pipeline, and also the only significant effect on the total sequence depth after removal of plant reads.
+
+
+# Examine Controls
+```{r}
+ps_cont <- subset_samples(ps_fungi, trtID == "PCRneg-1")
+ps_cont <- filter_taxa(ps_cont, function(x) mean(x) > 0, TRUE)
+otu_table(ps_cont)
+
+bad_taxa <- taxa_names(ps_cont)
+
+```
+
+* 9 ASVs in controls !! More than usual.
+
+```{r}
+ps_fungi@tax_table[bad_taxa] # 14 reads
+
+# variable taxonomy
+
+
+
+sort(rowSums(ps_fungi@otu_table[,bad_taxa]), dec = TRUE)
+## reads that appear in the negative, appear in every other sample run.
+
+```
+
+* Small problem with contamination in this run.
+* Would need a more advanced de-contamination protocol for this sequencing run than normal. (*SKIPPING FOR NOW*)
+
+
+
+
+# Diversity
+* For the statistical models, I only compared the wheat head, barley head, and corn leaf samples, not the debris or negative control. 
+
+### H Diversity
+```{r, fig.width = 8, fig.height = 4}
+# format for diversity
+SbyE <- SbyE[order(SbyE$trtID),]
+#identical(rownames(SbyE), rownames(SbyS)) #must be TRUE
+SbyE$Diversity <- diversity(SbyS, index = 'shannon')
+SbyE2 <- SbyE %>% filter(Crop.Type != 'Debris') %>% filter(trtID != 'PCRneg-1')
+SbyE2$PNA_Treatment <- factor(SbyE2$PNA_Treatment, 
+                              levels = c("0uM", "0.75uM", "1uM", "1.5uM"))
+
+p2 <- ggplot(SbyE2, aes(x = PNA_Treatment, y = Diversity, color = Crop.Type)) +
+  facet_grid(.~Crop.Type) +
+  geom_violin() + geom_jitter(size = 1.5, width = 0.2) +
+  guides(color = 'none') +
+  scale_x_discrete("PNA Treatment") + 
+  scale_y_continuous("Shannon Diversity", trans = "sqrt") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+#tiff("./figures/Fig3a_cropPNA.tiff", width=3.25, height=3.25, units="in", res=300)
+p2
+#dev.off()
+
+
+h.mod1 <- lm(Diversity ~ Crop.Type*PNA_Treatment, data = SbyE2)
+#par(mfrow=c(2,2))
+#plot(h.mod1)
+car::Anova(h.mod1, type = 2)
+```
+
+
+
+### Structure
+```{r, fig.width = 7, fig.height = 5}
+
+SbyS2 <- SbyS[rownames(SbyS) %in% rownames(SbyE2),]
+SbyS2 <- SbyS2[,colSums(SbyS2) >0]    #31 ASVs unique to debris
+dim(SbyS); dim(SbyS2)
+SbyS2.hel <- decostand(SbyS2, method = 'hellinger')
+dist <- vegdist(SbyS2.hel, method = 'bray')
+pcoa <- cmdscale(dist, eig =TRUE)
+expl_1 <- round(pcoa$eig[1] / sum(pcoa$eig), 3) * 100
+expl_2 <- round(pcoa$eig[2] / sum(pcoa$eig), 3) * 100 
+expl_3 <- round(pcoa$eig[3] / sum(pcoa$eig), 3) * 100 
+scores <- as.data.frame(pcoa$points)
+scores$ids <- rownames(scores) 
+pdat <- merge(scores, SbyE2, by.x="ids", by.y="trtID")
+rownames(pdat) <- as.character(pdat$ids)
+
+p3 <- ggplot() + coord_equal() + 
+    geom_point(data = pdat, aes(x = V1, y = V2, 
+          color = Crop.Type, shape = PNA_Treatment) , size = 1.5) +
+    scale_x_continuous(paste("PCoA 1 (", expl_1, "%)", sep = "")) +
+    scale_y_continuous(paste("PCoA 2 (", expl_2, "%)", sep = "")) +
+  scale_color_discrete("Crop") + scale_shape_discrete("") +
+  guides(color = 'none') +
+  theme(legend.position = 'top')
+#tiff("./figures/Fig3b_cropPNA.tiff", width=3.25, height=3.25, units="in", res=300)
+p3
+#dev.off()
+
+out <-adonis2(SbyS2.hel ~ Crop.Type*PNA_Treatment, data = SbyE2, 
+              method = 'bray', by = "margin")  
+out 
+# out2 <-adonis2(SbyS2.hel ~ Crop.Type+PNA_Treatment, data = SbyE2, 
+#               method = 'bray', by = "margin")  
+# out2 
+
+# NOTE - vegan::adonis2 has changed versions/formulas since this script was first written; so model script has changed, but results are the same.
+```
+
+*Only crop type affects the community structure and shannon diversity, not PNA test (=good!)
+
+```{r, include = FALSE}
+#tiff("./figures/Fig3_cropPNA.tiff", width=7, height=3.25, units="in", res=300)
+multiplot(p2+ggtitle("A"), p3+ggtitle("B"), cols = 2)
+#dev.off()
+
+```
+
+
+```{r}
+sessionInfo()
+```
+
+
+### end
