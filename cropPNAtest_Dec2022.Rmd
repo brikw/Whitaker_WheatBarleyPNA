@@ -1,0 +1,599 @@
+---
+title: "Test crop PNA Illumina Run Dec2022"
+author: "Briana K. Whitaker"
+date: "`r Sys.Date()`"
+output: html_document
+---
+\fontsize{9}{10}
+---
+
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.width=3.5, fig.height=3,
+                      warning=FALSE, message=FALSE)
+```
+
+
+* Run using `r version[['version.string']] `.
+
+# Objective
+This document reports on results from the Illumina Nano Run in Dec 2022, on 40 samples. 1 primer pair only. 3 wheat head, 3 barley head, and 3 corn leaf samples times four PNA treatment levels Plus 2 corn debris samples as positive controls [no plant amplification in previous trials], and two PCR negative controls.
+
+# 0) Load Packages, set path to data
+```{r, echo=FALSE, results='hide', include=FALSE} 
+
+x<-c("BiocManager", "dada2", "ShortRead", "Biostrings", "seqinr", 
+    "tidyverse", "ggplot2", "phyloseq", "DECIPHER")
+lapply(x, require, character.only = TRUE)
+
+#Load functions
+source("./code/fxn_blastr-bw.R")
+source("./code/blastn_code.R")
+
+#add 'not in' function
+`%nin%` = Negate(`%in%`)
+
+
+# decipher ids to dada2 function
+decipher_ids <- function(x) {
+        m <- match(ranks, x$rank)
+        taxa <- x$taxon[m]
+        taxa[startsWith(taxa, "unclassified_")] <- NA
+        taxa
+}
+
+
+#set seed
+set.seed(680)
+
+# set ggplot2 theme
+theme_set(theme_bw(base_size=16)) 
+theme_update(panel.grid.major=element_line(0), panel.grid.minor=element_line(0))
+
+
+samp.dat <- read.csv("./data/cropPNA_TestIllumina_2022-12-02.csv", stringsAsFactors = TRUE)
+rownames(samp.dat) <- samp.dat$trtID
+
+# set path for zipped and deindexed fastq files
+path <- "./bigData/Whitaker_2022.12.17"
+list.files(path)
+# 80 files,
+
+# #make a list of matched sample names
+# fnFs <- sort(list.files(path, pattern = "R1_001.fastq.gz", full.names = TRUE))
+# fnRs <- sort(list.files(path, pattern = "R2_001.fastq.gz", full.names = TRUE))
+# # check lengths
+# length(fnFs); length(fnRs)  #40 files each
+# 
+# 
+# get.Sample.ID <- function(fname) strsplit(basename(fname), "_")[[1]][1]
+# ids.dat <- as.data.frame(cbind("num" = unname(sapply(fnFs, get.Sample.ID)),
+#                                fnFs, fnRs))
+# 
+# save(fnFs, file="./intermediate/cropPNA_fnFs.RData")
+# save(fnRs, file="./intermediate/cropPNA_fnRs.RData")
+# write.csv(ids.dat, "./intermediate/cropPNA_ids.dat.csv")
+load("./intermediate/cropPNA_fnFs.RData")
+load("./intermediate/cropPNA_fnRs.RData")
+ids.dat <- read.csv("./data/cropPNA_ids.dat.csv", row.names=1)
+
+Sample.ID <- ids.dat$num
+#tableOfSampleIDs <- sort(table(Sample.ID))
+```
+
+### count seqs
+```{r, results='hide', echo=FALSE, include = FALSE}
+# #loop to count the number of seqs originally
+# #i = 1 #useful for checking
+# fwdSeqs <- list()
+# revSeqs <- list()
+# for (i in 1:length(fnFs)) {
+#  fwdSeqs[[i]] <- length(sapply(fnFs[i], getSequences))
+#  revSeqs[[i]] <- length(sapply(fnRs[i], getSequences))
+# }
+# 
+# identical(c(unlist(fwdSeqs)),c(unlist(revSeqs))) #TRUE
+# SeqsOrig.df <- data.frame(SampleID = c(basename(fnFs)) ,
+#           OrigSeqsFwd = c(unlist(fwdSeqs)),  OrigSeqsRev = c(unlist(revSeqs)))
+# rownames(SeqsOrig.df) <- SeqsOrig.df$SampleID
+# SeqsOrig.df <- SeqsOrig.df[,-1]
+# #write.csv(SeqsOrig.df, "./intermediate/TestIlluminaDec2022_TrackSequences_PriorFiltering.csv")
+
+SeqsOrig.df <- read.csv("./intermediate/TestIlluminaDec2022_TrackSequences_PriorFiltering.csv", row.names = 1)
+
+```
+
+* Summary of reads prior filtering
+
+```{r}
+mean(SeqsOrig.df[,1])
+median(SeqsOrig.df[,1])
+range(SeqsOrig.df[,1]) #lowest regular sample = 3552 reads
+```
+
+
+# 1) Initial Filter Step
+
+```{r, results='hide'}
+# filter out reads with ambiguous bases (N) only
+# Put N-filterd files in filtN/ subdirectory
+fnFs.filtN <- file.path(path, "filtN-", basename(fnFs)) 
+fnRs.filtN <- file.path(path, "filtN-", basename(fnRs))
+#filterAndTrim(fnFs, fnFs.filtN, fnRs, fnRs.filtN, maxN = 0)
+```
+
+### check primers
+```{r, results='hide', echo=FALSE}
+#check that we have the right orientation of both primers
+allOrients <- function(primer) {
+    # Create all orientations of the input sequence
+    require(Biostrings)
+    dna <- DNAString(primer)  #Biostrings needs DNAString objects
+    orients <- c(Forward = dna, Complement = complement(dna), Reverse = reverse(dna), 
+        RevComp = reverseComplement(dna))
+    return(sapply(orients, toString))  # Convert back to character vector
+}
+#count no. times primers appear (and orientations), for 1 file only as representative
+primerHits <- function(primer, fn) {
+    # Counts number of reads in which the primer is found
+    nhits <- vcountPattern(primer, sread(readFastq(fn)), fixed = FALSE)
+    return(sum(nhits > 0))
+}
+
+
+
+#identify primers used, including ambiguous bases
+FWD <- "GTGARTCATCGAATCTTTG" #fITS7
+REV <- "TCCTSCGCTTATTGATATGC" #ITS4ngs
+
+# return orientations
+FWD.orients <- allOrients(FWD);FWD.orients
+REV.orients <- allOrients(REV);REV.orients
+
+
+
+# read this table as -- the column headers indictaing the direction of the primer
+# (i.e., forward direction of either the FWD or REV primer)
+# and the rownames indicating the combo of primer (FWD/REV) and read type (Forward/Reverse)
+rbind(FWD.ForwardReads = sapply(FWD.orients, primerHits, fn = fnFs.filtN[[1]]), 
+    FWD.ReverseReads = sapply(FWD.orients, primerHits, fn = fnRs.filtN[[1]]), 
+    REV.ForwardReads = sapply(REV.orients, primerHits, fn = fnFs.filtN[[1]]), 
+    REV.ReverseReads = sapply(REV.orients, primerHits, fn = fnRs.filtN[[1]]))
+#                  Forward Complement Reverse RevComp
+# FWD.ForwardReads    8077          0       0       0
+# FWD.ReverseReads       0          0       0       0
+# REV.ForwardReads       0          0       0       0
+# REV.ReverseReads    7673          0       0       0
+# #NOTE -- all of these results are for barley B1-0
+
+rbind(FWD.ForwardReads = sapply(FWD.orients, primerHits, fn = fnFs.filtN[[14]]), 
+    FWD.ReverseReads = sapply(FWD.orients, primerHits, fn = fnRs.filtN[[14]]), 
+    REV.ForwardReads = sapply(REV.orients, primerHits, fn = fnFs.filtN[[14]]), 
+    REV.ReverseReads = sapply(REV.orients, primerHits, fn = fnRs.filtN[[14]]))
+#                  Forward Complement Reverse RevComp
+# FWD.ForwardReads    4702          0       0       0
+# FWD.ReverseReads       0          0       0       0
+# REV.ForwardReads       0          0       0       0
+# REV.ReverseReads    4512          0       0       0
+# #NOTE -- all of these results are for corn C1-H
+
+
+rbind(FWD.ForwardReads = sapply(FWD.orients, primerHits, fn = fnFs.filtN[[31]]), 
+    FWD.ReverseReads = sapply(FWD.orients, primerHits, fn = fnRs.filtN[[31]]), 
+    REV.ForwardReads = sapply(REV.orients, primerHits, fn = fnFs.filtN[[31]]), 
+    REV.ReverseReads = sapply(REV.orients, primerHits, fn = fnRs.filtN[[31]]))
+#                  Forward Complement Reverse RevComp
+# FWD.ForwardReads   17818          0       0       1
+# FWD.ReverseReads       0          0       0       2
+# REV.ForwardReads       0          0       0       0
+# REV.ReverseReads   17182          0       0       0
+# #NOTE -- all of these results are for wheat W1-L
+```
+
+# 2) Remove Primers
+```{r, results='hide', echo=FALSE}
+cutadapt <- "~/Python/Python310/Scripts/cutadapt.exe" #change to location on your machine
+system2(cutadapt, args = "--version") #v.4.0
+
+# make path for cutadapted files
+path.cut <- file.path(path, "cutadapt-")
+if (!dir.exists(path.cut)) dir.create(path.cut)
+fnFs.cut <- file.path(path.cut, basename(fnFs))
+fnRs.cut <- file.path(path.cut, basename(fnRs))
+
+
+#define reverse complements of each primer
+FWD.RC <- dada2:::rc(FWD)
+REV.RC <- dada2:::rc(REV)
+
+
+```
+
+### run cutadapt
+```{r, results='hide'}
+# make flags
+p1 <- paste("-g", FWD, "-a", REV.RC) #-g for 5' end, -a for 3' end
+p2 <- paste("-G", REV, "-A", FWD.RC) 
+
+# #Run Cutadapt
+# for (i in seq_along(fnFs)) {
+#  system2(cutadapt, args = c(p1, p2, "-n", 2, "-m", 50, "-e", 0.1,
+#              "-o", fnFs.cut[i], "-p", fnRs.cut[i],
+#                    fnFs.filtN[i],     fnRs.filtN[i] ))   }
+
+```
+
+### check primers removed
+```{r, results='hide', echo=FALSE}
+#sanity check, see if primers were removed from 1st sample
+rbind(FWD.ForwardReads = sapply(FWD.orients, primerHits, fn = fnFs.cut[[1]]), 
+    FWD.ReverseReads = sapply(FWD.orients, primerHits, fn = fnRs.cut[[1]]), 
+    REV.ForwardReads = sapply(REV.orients, primerHits, fn = fnFs.cut[[1]]), 
+    REV.ReverseReads = sapply(REV.orients, primerHits, fn = fnRs.cut[[1]]))
+
+rbind(FWD.ForwardReads = sapply(FWD.orients, primerHits, fn = fnFs.cut[[14]]), 
+    FWD.ReverseReads = sapply(FWD.orients, primerHits, fn = fnRs.cut[[14]]), 
+    REV.ForwardReads = sapply(REV.orients, primerHits, fn = fnFs.cut[[14]]), 
+    REV.ReverseReads = sapply(REV.orients, primerHits, fn = fnRs.cut[[14]]))
+
+rbind(FWD.ForwardReads = sapply(FWD.orients, primerHits, fn = fnFs.cut[[31]]), 
+    FWD.ReverseReads = sapply(FWD.orients, primerHits, fn = fnRs.cut[[31]]), 
+    REV.ForwardReads = sapply(REV.orients, primerHits, fn = fnFs.cut[[31]]), 
+    REV.ReverseReads = sapply(REV.orients, primerHits, fn = fnRs.cut[[31]]))
+
+# NOT perfectly clean on the wheat sample, which also had a problem pre-cutadapt
+
+
+#get filenames of cutadapt-ed files
+cutFs <- sort(list.files(path.cut, pattern = "R1_001.fastq.gz", full.names = TRUE))
+cutRs <- sort(list.files(path.cut, pattern = "R2_001.fastq.gz", full.names = TRUE))
+
+
+```
+
+### Inspect Quality Plots
+```{r, warning=FALSE, message=FALSE, results='hide', echo=FALSE, fig.height=4, fig.width =4}
+#inspect read quality plots
+#pdf("./figures/cropPNA_SequenceQuality.pdf",
+#    width=16/2.54, height=16/2.54)
+plotQualityProfile(cutFs[c(1:2)]) + ggtitle("Barley Fwd")
+plotQualityProfile(cutFs[c(14:15)]) + ggtitle("Corn Fwd")
+plotQualityProfile(cutFs[c(31:32)]) + ggtitle("Wheat Fwd")
+
+```
+
+-
+
+```{r, warning=FALSE, message=FALSE, results='hide', echo=FALSE, fig.height=4, fig.width =4}
+plotQualityProfile(cutRs[c(1:2)]) + ggtitle("Barley Rev")
+plotQualityProfile(cutRs[c(14:15)]) + ggtitle("Corn Rev")
+plotQualityProfile(cutRs[c(31:32)]) + ggtitle("Wheat Rev")
+#dev.off()
+```
+
+* wheat reads are lowest quality
+
+
+# 3) Filter and Trim
+
+```{r, results='hide', echo = FALSE}
+filtFs <- file.path(path, "filtered-final", basename(cutFs) )
+filtRs <- file.path(path, "filtered-final", basename(cutRs) )
+
+# #perform second filtering, keep maxN=0  #~1min
+# out <- filterAndTrim(cutFs, filtFs, cutRs, filtRs, maxN = 0,
+#                     maxEE = c(2, 2),
+#    truncQ = 2, minLen = 50, rm.phix = TRUE, compress = TRUE) 
+# #PCRneg-2 had no reads pass filter
+# save(out, file="./intermediate/cropPNA_FilterOut.RData")
+load("./intermediate/cropPNA_FilterOut.RData")
+```
+
+### Inspect the No. of reads, before and after 2nd filtering step
+```{r}
+out
+
+## No. of samples with >=1000 reads after main filtering
+dim(out[out[,2]>=3000,])[1]  #all samples >3000
+
+## average % pass the filter
+mean((out[,2]/out[,1])*100)
+```
+
+* decent amount of reads passed the filter :)
+
+```{r, results='hide', echo=FALSE}
+# write.csv(out, "./intermediate/cropPNA-SecondFilteringStep.csv")
+# out <- read.csv("./intermediate/cropPNA-SecondFilteringStep.csv", row.names=1)
+
+```
+
+
+# 4) Learn Errors, Dereplicate, & Denoise
+
+### Learn Errors
+* Look good overall, 35 samples used for learning.
+```{r, results='hide', echo=FALSE}
+# to continue with pipeline, ignoring samples that don't pass the filter
+not.lost <- out[,"reads.out"] > 0  
+#length(not.lost); dim(out)[1]  #1 samples reduced to 0 reads
+filtFs <- filtFs[not.lost]
+filtRs <- filtRs[not.lost]
+Sample.ID <- Sample.ID[not.lost]
+keep <- rownames(SeqsOrig.df)[not.lost]
+SeqsOrig.df <- SeqsOrig.df[rownames(SeqsOrig.df) %in% keep,]
+
+```
+```{r, results='hide'} 
+# did not do this   ## # re-order so that it matches SeqsOrig.df (if needed)
+## filtFs <- sort(filtFs)
+## filtRs <- sort(filtRs)
+## identical(basename(filtFs), rownames(SeqsOrig.df))
+
+# #The DADA2 algorithm makes use of a parametric error model (err),
+# errF <- learnErrors(filtFs) #used all 39 samples to learn
+# errR <- learnErrors(filtRs)
+# save(errF, file="./intermediate/cropPNA_errF.RData")
+# save(errR, file="./intermediate/cropPNA_errR.RData")
+load("./intermediate/cropPNA_errF.RData")
+load("./intermediate/cropPNA_errR.RData")
+```
+
+#### Plant Error Models
+```{r, results='hide', echo=FALSE}
+#sanity check, plot errors
+#pdf("figures/cropPNA-ErrorLearning.pdf", 
+#     width=16/2.54, height=16/2.54)
+plotErrors(errF, nominalQ=TRUE)  
+```
+
+-
+
+```{r, results='hide', echo=FALSE}
+plotErrors(errR, nominalQ=TRUE)
+#dev.off()
+```
+
+
+### Dereplicate
+
+```{r, results='hide'}
+# #dereplicate identical reads into unique reads (with an abundance/count value)
+# derepFs <- derepFastq(filtFs, verbose=TRUE)
+# derepRs <- derepFastq(filtRs, verbose=TRUE)
+# # Name the derep-class objects by the sample names
+# names(derepFs) <- Sample.ID
+# names(derepRs) <- Sample.ID
+
+```
+```{r, results='hide', echo=FALSE}
+# save(derepFs, file="./intermediate/cropPNA_derepFs.RData")
+# save(derepRs, file="./intermediate/cropPNA_derepRs.RData")
+load("./intermediate/cropPNA_derepFs.RData")
+load("./intermediate/cropPNA_derepRs.RData")
+derepFs[1] #example
+```
+
+### Denoise
+
+```{r, results='hide'}
+# # core denoising algorithm
+# #   is built on the parametric error model inferred directly from reads.
+# dadaFs <- dada(derepFs, err=errF)
+# dadaRs <- dada(derepRs, err=errR)
+# save(dadaFs, file="./intermediate/cropPNA_dadaFs.RData")
+# save(dadaRs, file="./intermediate/cropPNA_dadaRs.RData")
+load("./intermediate/cropPNA_dadaFs.RData")
+load("./intermediate/cropPNA_dadaRs.RData")
+dadaFs[1] #example
+```
+
+# 5) Make Contigs
+
+```{r, results='hide'}
+# #merge fwd and rev reads together, i.e. contigs     
+# mergers <- mergePairs(dadaFs, derepFs, dadaRs, derepRs, verbose = TRUE)
+# #NOTE !! can add additional arg. minOverlap
+# save(mergers, file="./intermediate/cropPNA_Mergers.RData")
+load("./intermediate/cropPNA_Mergers.RData")
+```
+```{r, results='hide', echo=FALSE}
+# # Inspect the merger data.frame from the first sample
+# head(mergers[[1]])
+# 
+# # make amplicon sequence variant table (ASV) table
+# seqtab <- makeSequenceTable(mergers)
+# dim(seqtab)
+# #[1]   39 284
+# save(seqtab, file="./intermediate/cropPNA_seqtab.RData")
+load("./intermediate/cropPNA_seqtab.RData")
+```
+
+### Get a sense of contig length variation
+```{r, results='hide', echo=FALSE}
+#table(nchar(getSequences(seqtab))) #80-408bp
+hist(nchar(getSequences(seqtab)), main = "Seq. Length", breaks = 20)
+med.seqtab <- median(nchar(getSequences(seqtab))); #med.seqtab #259
+abline(v= med.seqtab, lty=2, col='red', lwd=3) 
+```
+
+* Median basepair length across whole dataset, regardless of sample and with no merge minOverlap is 259bp
+
+# 6) Chimera checking
+```{r, results='hide'}
+# identify chimeras
+seqtab.nochim <- removeBimeraDenovo(seqtab, method="consensus", verbose=TRUE)
+#Identified 4 bimeras out of 284 input sequences.
+```
+
+### Freq. of chimeric sequences
+```{r}
+sum(seqtab.nochim)/sum(seqtab)
+```
+
+* <<1% chimeras by adundance
+
+```{r, results='hide', echo=FALSE}
+# dim(seqtab.nochim)
+# [1]  39 280
+# hist(nchar(getSequences(seqtab.nochim)), main = "Seq. Length", breaks = 20)
+# save(seqtab.nochim, file="./data/cropPNA_seqtab.nochim.RData")
+# write.csv(seqtab.nochim, "./data/cropPNA_SbyS.csv")
+
+```
+
+# 7) Track Reads
+
+**(hidden)**
+
+```{r, results='hide', echo=FALSE}
+#subset again to remove any samples that did not pass filtering
+out2 <- out[not.lost,]
+identical(rownames(SeqsOrig.df), rownames(out2)) #sanity check #TRUE
+identical(names(dadaFs), rownames(seqtab.nochim))
+
+getN <- function(x) sum(getUniques(x))
+
+# # track reads through the pipeline
+# track <- cbind(SeqsOrig.df[,1],
+#              out2[,1],
+#              round(out2[,1]/SeqsOrig.df[,1]*100, 2),
+#              out2[,2],
+#              round(out2[,2]/out2[,1]*100,2),
+# 
+#              sapply(dadaFs, getN), sapply(dadaRs, getN),
+#              round(sapply(dadaFs, getN)/out2[,2]*100,2),
+#              sapply(mergers, getN),
+#              round(sapply(mergers, getN)/sapply(dadaFs, getN)*100,2),
+#              rowSums(seqtab.nochim),
+#              round(rowSums(seqtab.nochim)/sapply(mergers, getN)*100,2))
+# 
+# colnames(track) <- c("OrigSeqsF", "post1stFilter",
+#  "PercKept1stFilter", "post2ndFilter", "PercKept2ndFilter","denoisedF",
+#  "denoisedR", "PercKeptDenoise", "Merged", "PercKeptMerge",
+#  "postChimera","PercKeptChimera")
+# rownames(track) <- Sample.ID
+# head(track)
+# write.csv(track, "./data/cropPNA_TrackSequences.csv")
+track <- read.csv("./data/cropPNA_TrackSequences.csv", 
+                 row.names = 1)
+
+```
+
+
+# 8) Organize post-DADA2 datasets
+
+```{r, results='hide', echo=FALSE}
+SbyS <- read.csv("./data/cropPNA_SbyS.csv", row.names=1)
+load("./data/cropPNA_seqtab.nochim.RData")
+dim(seqtab.nochim); dim(SbyS)  
+
+```
+
+```{r, results='hide', echo=FALSE}
+SbyE <- samp.dat
+
+SbyE$trtID <- as.factor(SbyE$trtID)
+SbyE$ID <- as.factor(SbyE$ID)
+SbyE$Crop.Type <- as.factor(SbyE$Crop.Type)
+SbyE$PNA_Treatment_Code <- as.factor(SbyE$PNA_Treatment_Code)
+SbyE$PNA_Treatment <- as.factor(SbyE$PNA_Treatment)
+SbyE$Replicate <- as.factor(SbyE$Replicate)
+SbyE$Index_N7XX <- as.factor(SbyE$Index_N7XX)
+SbyE$Index_S5XX <- as.factor(SbyE$Index_S5XX)
+
+# drop PCRneg 2, as no reads passed filter
+SbyE <- SbyE[SbyE$trtID != "PCRneg-2",]
+
+str(SbyE)
+
+# sanity check, must be true
+identical(sort(rownames(SbyE)), sort(rownames(seqtab.nochim)))
+
+
+
+# #phyloseq object
+# ps <- phyloseq(otu_table(seqtab.nochim, taxa_are_rows=FALSE),
+#                     sample_data(SbyE))
+# dna <- Biostrings::DNAStringSet(taxa_names(ps))
+# names(dna) <- taxa_names(ps)
+# ps <- merge_phyloseq(ps, dna)
+# taxa_names(ps) <- paste0("ASV", seq(ntaxa(ps)))
+# ps
+# #output my own fasta file
+# writeXStringSet(refseq(ps),
+#                 filepath = "./data/cropPNA_uniqueSeqs.fasta")
+uniqueSS <- readDNAStringSet("./data/cropPNA_uniqueSeqs.fasta")
+# # save ps object
+# save(ps, file="./data/cropPNA_ps.RData")
+load("./data/cropPNA_ps.RData")
+ps
+
+```
+
+* Number of unique ASVs: `r length(getUniques(seqtab.nochim))`
+* Pre-nonFungal ASV removal average read count `r round(mean(rowSums(SbyS)),0)`
+
+
+
+# 9) Taxonomic Assignment - DECIPHER
+* and determine assignments with low confidence at the kingdom level
+```{r, results='hide', echo=FALSE}
+# #first run using UNITE v2020 (~34K Kb size)
+
+
+# # load reference 'trainingSet'
+# load("~/Documents/ReferenceGenomes/UNITE_v2020_February2020.RData")
+# 
+# ids <- IdTaxa(ps@refseq, trainingSet, strand = "both", verbose = FALSE,
+#               threshold = 70, processors = NULL)  
+# save(ids, file="./data/cropPNA_decipher_ids.RData")
+load("./data/cropPNA_decipher_ids.RData")
+
+# # ranks of interest
+# ranks <- c("kingdom", "phylum", "class", "order", "family", "genus", "species") 
+# taxid <- t(sapply(ids,  decipher_ids))
+# colnames(taxid) <- ranks
+# tax_table(ps) <- taxid
+# save(ps, file="./data/cropPNA_ps_ids.RData")
+
+load("./data/cropPNA_ps_ids.RData")
+ps
+
+table(ps@tax_table@.Data[,'kingdom'])
+dim(ps@tax_table@.Data)   # so 37 ASVs with confidence <70 to place at fungal kingdom level
+
+# conf <- data.frame(
+#     k.conf = c(sapply(ids,  function(x) ifelse(x$confidence[2] != 'NA',
+#                                                x$confidence[2], 'NA')) ),
+#     p.conf = c(sapply(ids,  function(x) ifelse(x$confidence[3] != 'NA',
+#                                                x$confidence[3], 'NA')) ),
+#     c.conf = c(sapply(ids,  function(x) ifelse(x$confidence[4] != 'NA',
+#                                                x$confidence[4], 'NA')) ),
+#     o.conf = c(sapply(ids,  function(x) ifelse(x$confidence[5] != 'NA',
+#                                                x$confidence[5], 'NA')) ),
+#     f.conf = c(sapply(ids,  function(x) ifelse(x$confidence[6] != 'NA',
+#                                                x$confidence[6], 'NA')) ),
+#     g.conf = c(sapply(ids,  function(x) ifelse(x$confidence[7] != 'NA',
+#                                                x$confidence[7], 'NA')) ),
+#     s.conf = c(sapply(ids,  function(x) ifelse(x$confidence[8] != 'NA',
+#                                                x$confidence[8], 'NA')) )   )
+# write.csv(conf, file="./data/cropPNA_decipher_ids_conf.csv")
+
+conf <- read.csv("./data/cropPNA_decipher_ids_conf.csv", row.names = 1)
+conf[1:10,]
+
+```
+
+
+
+```{r}
+sessionInfo()
+```
+
+
+
+
+
+
+### end
