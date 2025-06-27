@@ -28,6 +28,12 @@ x<-c("Biostrings", "car", "genefilter", "MASS",
     "tidyverse", "ggplot2", "phyloseq", "vegan")
 lapply(x, require, character.only = TRUE)
 
+# require(devtools); packageVersion("devtools")               #v.‘2.4.5’
+# devtools::install_github("shenhav-and-korem-labs/SCRuB")
+require(torch); packageVersion("torch")                     #v.‘0.15.0’
+require(SCRuB); packageVersion("SCRuB")                     #v.‘0.0.1’
+
+
 #Load functions
 source("./code/fxn_blastr-bw.R")
 source("./code/blastn_code.R")
@@ -256,24 +262,49 @@ bad_taxa <- taxa_names(ps_cont)
 
 ```
 
-* 9 ASVs in controls !! More than usual.
+* 9 ASVs in controls. More than usual.
 
 ```{r}
 ps_fungi@tax_table[bad_taxa] # 14 reads
-
 # variable taxonomy
-
-
-
-sort(rowSums(ps_fungi@otu_table[,bad_taxa]), dec = TRUE)
+#sort(rowSums(ps_fungi@otu_table[,bad_taxa]), dec = TRUE)
 ## reads that appear in the negative, appear in every other sample run.
-
 ```
 
-* Small problem with contamination in this run.
-* Would need a more advanced de-contamination protocol for this sequencing run than normal. (*SKIPPING FOR NOW*)
+* Small problem with contamination in this run. Use SCRuB to decontaminate.
 
+```{r}
+meta <- (as(sample_data(ps_fungi), "data.frame"))
+mat <- (as(otu_table(ps_fungi), "matrix"))
 
+# format for SCRuB
+meta$sample_well <- as.character(meta$Well)
+meta$is_control <- ifelse(meta$trtID== "PCRneg-1", "TRUE", "FALSE")
+meta$sample_type <- ifelse(meta$trtID== "PCRneg-1", "NegControl", 
+                           ifelse(meta$Crop.Type== "Debris", "Debris", "Phyllosphere"))
+meta %>% arrange(trtID) %>% select(is_control, sample_type, sample_well) -> meta
+mat %>% data.frame %>% mutate(ids = rownames(mat)) %>%
+    arrange(ids) %>% select(-ids) %>% as.matrix -> mat
+#identical(rownames(mat), rownames(meta)) #TRUE
+
+# scr_out <- SCRuB(mat, meta, control_order = "NegControl" )  #with spatial info aka well info
+# save(scr_out, file="./data/cropPNA_scrubOut.RData")
+load("./data/cropPNA_scrubOut.RData")
+
+# Estimated contamination level #read boxplot as contam proportion
+(1 - scr_out$p) %>% boxplot()              
+median(100-(scr_out$p*100))  #0%  (in percentages)
+# Estimated realtive abundance of the contamination community
+scr_out$inner_iterations$`NegControl`$gamma %>% plot()  # 4 asvs w/ some higher contam
+### Estimate well-to-well leakage from PCR controls
+scr_out$inner_iterations$`NegControl`$alpha[, ncol(scr_out$inner_iterations$`NegControl`$alpha)]
+# 0.05% well-to-well leakage across plate
+
+# final SbyS mat cleaned up
+decon <- scr_out$decontaminated_samples %>% as.matrix()
+dim(decon) # removes neg. control, 38 samples remain, 264 taxa (loss of 16 taxa)
+#dim(SbyS)
+```
 
 
 # Diversity
@@ -282,10 +313,10 @@ sort(rowSums(ps_fungi@otu_table[,bad_taxa]), dec = TRUE)
 ### H Diversity
 ```{r, fig.width = 8, fig.height = 4}
 # format for diversity
-SbyE <- SbyE[order(SbyE$trtID),]
-#identical(rownames(SbyE), rownames(SbyS)) #must be TRUE
-SbyE$Diversity <- diversity(SbyS, index = 'shannon')
-SbyE2 <- SbyE %>% filter(Crop.Type != 'Debris') %>% filter(trtID != 'PCRneg-1')
+SbyE <- SbyE[order(SbyE$trtID),] %>% filter(trtID != "PCRneg-1")
+#identical(rownames(SbyE), rownames(decon)) #must be TRUE
+SbyE$Diversity <- diversity(decon, index = 'shannon')
+SbyE2 <- SbyE %>% filter(Crop.Type != 'Debris')
 SbyE2$PNA_Treatment <- factor(SbyE2$PNA_Treatment, 
                               levels = c("0uM", "0.75uM", "1uM", "1.5uM"))
 
@@ -301,7 +332,6 @@ p2 <- ggplot(SbyE2, aes(x = PNA_Treatment, y = Diversity, color = Crop.Type)) +
 p2
 #dev.off()
 
-
 h.mod1 <- lm(Diversity ~ Crop.Type*PNA_Treatment, data = SbyE2)
 #par(mfrow=c(2,2))
 #plot(h.mod1)
@@ -312,10 +342,9 @@ car::Anova(h.mod1, type = 2)
 
 ### Structure
 ```{r, fig.width = 7, fig.height = 5}
-
-SbyS2 <- SbyS[rownames(SbyS) %in% rownames(SbyE2),]
-SbyS2 <- SbyS2[,colSums(SbyS2) >0]    #31 ASVs unique to debris
-dim(SbyS); dim(SbyS2)
+SbyS2 <- decon[rownames(decon) %in% rownames(SbyE2),]
+SbyS2 <- SbyS2[,colSums(SbyS2) >0]    #29 ASVs unique to debris
+#dim(decon); dim(SbyS2)
 SbyS2.hel <- decostand(SbyS2, method = 'hellinger')
 dist <- vegdist(SbyS2.hel, method = 'bray')
 pcoa <- cmdscale(dist, eig =TRUE)
@@ -339,12 +368,14 @@ p3 <- ggplot() + coord_equal() +
 p3
 #dev.off()
 
+#test interaction
 out <-adonis2(SbyS2.hel ~ Crop.Type*PNA_Treatment, data = SbyE2, 
               method = 'bray', by = "margin")  
-out 
-# out2 <-adonis2(SbyS2.hel ~ Crop.Type+PNA_Treatment, data = SbyE2, 
-#               method = 'bray', by = "margin")  
-# out2 
+out   #not sgnif
+# test main effects
+out2 <-adonis2(SbyS2.hel ~ Crop.Type+PNA_Treatment, data = SbyE2, 
+             method = 'bray', by = "margin")  
+out2 
 
 # NOTE - vegan::adonis2 has changed versions/formulas since this script was first written; so model script has changed, but results are the same.
 ```
