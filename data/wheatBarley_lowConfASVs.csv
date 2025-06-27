@@ -1,0 +1,45 @@
+,ASV,Problematic,NCBI-Blast-Group,NCBI-Blast-ID,Notes
+1,ASV2,yes,Plant,Triticum,
+2,ASV3,yes,Plant,Hordeum,
+3,ASV5,yes,Plant,Triticum,
+4,ASV9,yes,Plant,Triticum,
+5,ASV10,yes,Plant,Triticum,
+6,ASV16,yes,Plant,Triticum,
+7,ASV36,,Fungi,Asco,
+8,ASV63,,Fungi,Asco,
+9,ASV76,yes,,,possible chimera
+10,ASV77,,Fungi,Asco,
+11,ASV82,,Fungi,Asco,
+12,ASV95,,Fungi,Basidio,
+13,ASV96,yes,,,possible chimera
+14,ASV110,,Fungi,Asco,
+15,ASV111,,Fungi,Basidio,
+16,ASV117,yes,Plant,Aegilops,
+17,ASV120,,Fungi,Basidio,
+18,ASV128,,Fungi,Basidio,
+19,ASV130,yes,Plant,Triticum,
+20,ASV133,yes,Plant,Aegilops,
+21,ASV134,yes,Plant,Triticum,
+22,ASV137,yes,Plant,Triticum,
+23,ASV139,yes,Plant,Triticum-Hordeum,really short seq (80bp)
+24,ASV140,,Fungi,Asco,
+25,ASV145,yes,Algae,Algae,
+26,ASV146,yes,Plant,Triticum,
+27,ASV147,yes,,,possible chimera
+28,ASV153,yes,Plant,Triticum,
+29,ASV163,yes,Algae,Algae,
+30,ASV173,yes,Plant,Triticum,really short seq (84bp)
+31,ASV181,yes,,,only 1 hit
+32,ASV187,,Fungi,Asco,
+33,ASV188,,Fungi,Basidio,
+34,ASV198,,Fungi,Basidio,
+35,ASV199,yes,Plant,Triticum,
+36,ASV200,yes,Plant,Triticum,
+37,ASV201,yes,Plant,Triticum,
+38,ASV202,yes,Plant,Triticum,
+39,ASV205,yes,,,possible chimera
+40,ASV207,yes,Plant,Triticum,
+41,ASV213,yes,,,possible chimera
+42,ASV222,,Fungi,Asco,
+43,ASV226,yes,Plant,Triticum,
+44,ASV227,yes,Plant,Triticum,

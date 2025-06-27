@@ -1,0 +1,9 @@
+kmer_number,kmer_seq,Length_bp,Tm,Purine_Perc,GC_content,Design,Self_complementarity,complementarity_notes
+kmer_1,GGCCGAGGGCACG,13,85.8,69.2,84.6,Redesign recommended; Purine content > 50% AND G content > 35%,none,
+kmer_2,GCCGAGGGCACGC,13,84.4,61.5,84.6,Redesign recommended; Purine content > 50% AND G content > 35%,some,gccGAGggcACGC
+kmer_3,CCGAGGGCACGCC,13,81.8,53.8,84.6,Redesign recommended; Purine content > 50% AND G content > 35%,some,CCGAGggcACgcc
+kmer_6,AGGGCACGCCTGC,13,81.7,53.8,76.9,Redesign recommended; Purine content > 50% AND G content > 35%,two,"AGGgcaCgccTGC, AGGgcaCgcCtgc"
+kmer_11,ACGCCTGCCTGGG,13,79.1,46.2,76.9,Redesign recommended; G content > 35% (i.e. 38.5%),none,
+kmer_12,GGCCGAGGGCACGC,14,88,64.3,85.7,Redesign recommended; Purine content > 50% AND G content > 35%,none,
+kmer_13,GCCGAGGGCACGCC,14,86.1,57.1,85.7,Redesign recommended; Purine content > 50% AND G content > 35%,two,"gccGAGggcACGCC, GCCGAGggcACgcc"
+kmer_22,GGCCGAGGGCACGCC,15,89.4,60,86.7,Redesign recommended; Purine content > 50% AND G content > 35%,some,ggcCGAGGGCACgcc

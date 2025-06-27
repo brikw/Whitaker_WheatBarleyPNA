@@ -1,0 +1,349 @@
+---
+title: "Design PNAs for crop plants"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+author: "Briana K. Whitaker"
+date: "`r Sys.Date()`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      warning=FALSE, message=FALSE)
+```
+
+* Run using `r version[['version.string']] `.
+
+# Objective
+Goal: Find PNA candidates that block plant ITS amplification, within the context of the fITS7-ITS4ngs primer spanning region.
+Species of interest: Triticum aestivum (i.e., WHT), Glycine max (i.e., SOY), Hordeum vulgare (i.e. BAR), & (Maybe) Zea mays (i.e., CRN).
+
+# Load packages
+```{r, echo = FALSE, results='hide'}
+### packages
+
+x<-c("BiocManager", "DECIPHER", "ShortRead", "ggplot2", "tidyverse",     #"devtools", "rBLAST", "FastaUtils",
+      "seqinr", "ape", "dplyr", "RColorBrewer", "reshape2", "phyloseq")
+lapply(x, require, character.only = TRUE)
+
+
+## functions and read-in source code
+source("./code/multiplot.function.R")
+source("./code/summary_stats_NAs.R")
+source("./code/fxn_Lundberg2013kmers.R")
+
+
+# set ggplot2 theme
+theme_set(theme_bw(base_size=12)) 
+theme_update(panel.grid.major=element_line(0), panel.grid.minor=element_line(0))
+
+
+# color schemes
+dna.col <- c("#66C2A5", "#FC8D62", "#8DA0CB", "#E78AC3", "grey60", "grey60")
+
+
+
+```
+
+# Plant DNA Templates
+
+* ITS BLAST hits of plant reference genomes
+```{r}
+Ta.SS.hits <- readDNAStringSet("./data/Taestivum_IWGSC_v2.1__queryTa_KY437101.1-MN787127.1_filtered.fasta")
+Zm.SS.hits <- readDNAStringSet("./data/Zmays_493_APGv4__queryZm_EU955045.1_filtered.fasta")
+Hv.SS.hits <- readDNAStringSet("./data/Hvulgare_462_r1__queryHv_ncbi_consensus_filtered.fasta")
+Gm.SS.hits <- readDNAStringSet("./data/Gmax_508_v4__queryGm_ncbi_consensus_filtered-2divergentSeqs.fasta")
+
+```
+
+* Of these alignments, only the Gm looks reasonably constant across the breadth of the ITS.
+
+### ASVs from previous sequencing runs
+```{r}
+Ta.asvs2 <- readDNAStringSet("./data/ASVs/Ta_ASVs_ITS2.fasta") #29
+Zm.asvs2 <- readDNAStringSet("./data/ASVs/Zm_ASVs_ITS2.fasta") #3
+Hv.asvs2 <- readDNAStringSet("./data/ASVs/Hv_ASVs_ITS2.fasta") #8
+Gm.asvs2 <- readDNAStringSet("./data/ASVs/Gm_ASVs_ITS2.fasta") #1
+
+#Note - Ta_ASVs_ITS2_aln.fasta has 3 ASVs that are very very divergent from the rest
+  # ASV 227 226 130 from the Sept Nano run of ITS2 region, will remove and realign
+```
+
+### primers
+```{r}
+fITS7   <- DNAString("GTGARTCATCGAATCTTTG")
+ITS4ngs <- DNAString("TCCTSCGCTTATTGATATGC")
+
+fITS7.rc <- reverseComplement(fITS7)
+ITS4ngs.rc <- reverseComplement(ITS4ngs)
+
+
+fITS7; fITS7.rc
+ITS4ngs; ITS4ngs.rc
+```
+
+
+# Visualize alignment of plant ASVs
+* Aligned plant ASVs usingMAFFT-LINSI on ceres.
+* The visualization of the alignment is below, focusing on the full alignment.
+
+
+### Ta
+```{r, echo=FALSE, results='hide', fig.height=5, fig.width=7}
+Ta.aln2 <- seqinr::read.alignment("./data/ASVs/Ta_ASVs_ITS2_aln_sub.fasta",
+                        format = "fasta")
+Ta.bin2 <- ape::as.DNAbin(Ta.aln2)  #394 bp long
+Ta.wind2 <- Ta.bin2[, 82:159]    
+    # c(4:6,8:9) top abundant ASVs rom nanoITS2, perfect match 82:159bp
+    # c(4:7,10,14:21,26) all ASVs from nanoITS2, only >13bp window 120:146
+    # generally agrees with JDR's data too
+ape::image.DNAbin(Ta.wind2, cex.lab = 0.50, col = dna.col)
+```
+
+* based on comparing Ta alignment of blasted ITS from Ta genome (Geneious), these ASVs are already forward oriented from the 5.8S to the LSU
+
+### Hv
+```{r, echo=FALSE, results='hide', fig.height=5, fig.width=7}
+Hv.aln2 <- seqinr::read.alignment("./data/ASVs/Hv_ASVs_ITS2_aln.fasta",
+                        format = "fasta")
+Hv.bin2 <- ape::as.DNAbin(Hv.aln2)  #393 bp long
+Hv.wind2 <- Hv.bin2[, 82:181]
+ape::image.DNAbin(Hv.wind2, cex.lab = 0.50, col = dna.col)
+```
+
+* based on comparing Hv alignment of blasted ITS from Hv genome (Geneious), these ASVs are already forward oriented from the 5.8S to the LSU
+
+### Zm
+```{r, echo=FALSE, results='hide', fig.height=5, fig.width=7}
+Zm.aln2 <- seqinr::read.alignment("./data/ASVs/Zm_ASVs_ITS2_aln.fasta",
+                        format = "fasta")
+Zm.bin2 <- ape::as.DNAbin(Zm.aln2)  #391 bp long
+Zm.wind2 <- Zm.bin2[, 82:183]  #63-81 is the fITS7primer (with mismatches)
+ape::image.DNAbin(Zm.wind2, cex.lab = 0.50, col = dna.col)
+```
+
+* based on comparing Zm alignment of blasted ITS from Zm genome (Geneious), these ASVs are already forward oriented from the 5.8S to the LSU.
+* Note: thes ASVs match up with 5.8S-fun primer as forward 
+
+### Gm
+```{r, echo=FALSE, results='hide', fig.height=5, fig.width=7}
+Gm.aln2 <- seqinr::read.alignment("./data/ASVs/Gm_ASVs_ITS2.fasta",   # only 1 ASV, no aln
+                        format = "fasta")
+Gm.bin2 <- ape::as.DNAbin(Gm.aln2)  #382 bp long, 1 sequence
+Gm.wind2 <- Gm.bin2[, 82:181] #63-81 is the fITS7 primer (with mismatches)
+ape::image.DNAbin(Gm.wind2, cex.lab = 0.50, col = dna.col)
+```
+
+* based on comparing Gm alignment of blasted ITS from Gm genome (Geneious), this ASV is already forward oriented from the 5.8S to the LSU
+
+
+#Create kmers
+```{r, results = 'hide'}
+myk.list <- list(13,14,15,16,17)
+```
+
+### Crops individually
+```{r}
+Ta.aln2 <- readDNAStringSet("./data/ASVs/Ta_ASVs_ITS2_aln_sub.fasta")
+Ta.char <- paste(as.character(Ta.aln2$Ta_nanoITS2_ASV2[82:152]), 
+             as.character(Ta.aln2$Ta_nanoITS2_ASV2[154:159]), sep = "")
+    #most abundant ASV from fITS7-ITS4ngs Illumina Run
+    # also skipped blank pesent in 1 minor ASV to make kmers better
+Ta.best <- list(Ta.char=Ta.char)  
+Ta.13to17 <- make_all_kmers(Ta.char, myk.list)
+Ta.13to17 <- DNAStringSet(Ta.13to17)
+#writeXStringSet(Ta.13to17, "./data/kmers/Ta_kmers13-17.fasta")
+
+```
+* Identified `r length(Ta.13to17)` candidate kmers for the Ta ITS2 region
+
+
+```{r}
+Hv.aln2 <- readDNAStringSet("./data/ASVs/Hv_ASVs_ITS2_aln.fasta")
+Hv.char <- as.character(Hv.aln2$Hv_nanoITS2_ASV3[82:181])  
+    #most abundant ASV from fITS7-ITS4ngs Illumina Run
+Hv.best <- list(Hv.char=Hv.char)  
+Hv.13to17 <- make_all_kmers(Hv.char, myk.list)
+Hv.13to17 <- DNAStringSet(Hv.13to17)
+#writeXStringSet(Hv.13to17, "./data/kmers/Hv_kmers13-17.fasta")
+
+```
+* Identified `r length(Hv.13to17)` candidate kmers for the Hv ITS2 region
+
+
+```{r}
+Zm.aln2 <- readDNAStringSet("./data/ASVs/Zm_ASVs_ITS2_aln.fasta")
+Zm.char <- paste(as.character(Zm.aln2$Zm_JDRnanoITS2_ASV17[82:156]),  
+                 as.character(Zm.aln2$Zm_JDRnanoITS2_ASV17[159:183]), sep = "")
+    #most abundant ASV from JDR Nano Illumina Run
+    #also skipped blank pesent in 1 minor ASV to make kmers better
+Zm.best <- list(Zm.char=Zm.char)  
+Zm.13to17 <- make_all_kmers(Zm.char, myk.list)
+Zm.13to17 <- DNAStringSet(Zm.13to17)
+#writeXStringSet(Zm.13to17, "./data/kmers/Zm_kmers13-17.fasta")
+
+```
+* Identified `r length(Zm.13to17)` candidate kmers for the Zm ITS2 region
+
+
+```{r}
+Gm.aln2 <- readDNAStringSet("./data/ASVs/Gm_ASVs_ITS2.fasta")
+Gm.char <- as.character(Gm.aln2$Gm_JDRnanoITS2_ASV1[82:181])  
+    #only ASV from JDR nano Illumina Run (but if I remember, covered some 95% of seqs)
+Gm.best <- list(Gm.char=Gm.char)  
+Gm.13to17 <- make_all_kmers(Gm.char, myk.list)
+Gm.13to17 <- DNAStringSet(Gm.13to17)
+#writeXStringSet(Gm.13to17, "./data/kmers/Gm_kmers13-17.fasta")
+
+```
+* Identified `r length(Gm.13to17)` candidate kmers for the Gm ITS2 region
+
+### Figure - Crops all - 
+* using 1 representative sequence per crop
+```{r}
+sapply(list( Ta.aln2$Ta_nanoITS2_ASV2[c(82:152,154:182)],
+             Hv.aln2$Hv_nanoITS2_ASV3[82:181],
+             Zm.aln2$Zm_JDRnanoITS2_ASV17[c(82:156,159:183)],
+             Gm.aln2$Gm_JDRnanoITS2_ASV1[82:181]) , as.character) -> out
+names(out) <- c("Ta", "Hv", "Zm", "Gm")
+fITS7_100bp <- DNAStringSet(out)
+#writeXStringSet(fITS7_100bp, "./data/fITS7_100bp_allCrops.fasta")
+
+all.aln2 <- seqinr::read.alignment("./data/fITS7_100bp_allCrops_aln.fasta",
+                        format = "fasta")
+all.bin2 <- ape::as.DNAbin(all.aln2)
+all.wind2 <- all.bin2[, 1:75]  #perfect all 1:18, perfect except corn 27:49, perfect only Ta+Hv 1:75
+ape::image.DNAbin(all.wind2, cex.lab = 0.50, col = dna.col)
+
+all.aln2 <- readDNAStringSet("./data/fITS7_100bp_allCrops_aln.fasta")  #load in as SS
+all.char <- as.character(all.aln2$Hv[1:75])  
+all.best <- list(all.char=all.char)  
+all.13to17 <- make_all_kmers(all.char, myk.list)
+all.13to17 <- DNAStringSet(all.13to17)
+#writeXStringSet(all.13to17, "./data/kmers/all_1-75bp_kmers13-17.fasta")
+
+
+# for the sub-regions that are the highest matches across all 4 crops
+all2.char <- as.character(all.aln2$Hv[1:18])  
+all2.best <- list(all2.char=all2.char)  
+all2.13to17 <- make_all_kmers(all2.char, myk.list)
+all2.13to17 <- DNAStringSet(all2.13to17)
+#writeXStringSet(all2.13to17, "./data/kmers/all_1-18bp_kmers13-17.fasta")
+
+all3.char <- as.character(all.aln2$Hv[27:49])  
+all3.best <- list(all3.char=all3.char)  
+all3.13to17 <- make_all_kmers(all3.char, myk.list)
+all3.13to17 <- DNAStringSet(all3.13to17)
+#writeXStringSet(all3.13to17, "./data/kmers/all_27-49bp_kmers13-17.fasta")
+
+```
+
+# Results of kmer BLAST query against Fungal DB
+
+* Used 2021 UNITE db, but only fungi species hypothesis, not singletons, nor with all Euks
+* two blast parms: -word_size 13 -perc_identity 100
+
+```{r}
+all.hits <- read.csv("./data/kmers/all_1-75bp_kmers13-17_hits.csv", 
+                 stringsAsFactors = TRUE, row.names = 1 )
+Ta.hits <- read.csv("./data/kmers/Ta_kmers13-17_hits.csv", 
+                 stringsAsFactors = TRUE, row.names = 1 )
+Hv.hits <- read.csv("./data/kmers/Hv_kmers13-17_hits.csv", 
+                 stringsAsFactors = TRUE, row.names = 1 )
+Zm.hits <- read.csv("./data/kmers/Zm_kmers13-17_hits.csv", 
+                 stringsAsFactors = TRUE, row.names = 1 )
+Gm.hits <- read.csv("./data/kmers/Gm_kmers13-17_hits.csv", 
+                 stringsAsFactors = TRUE, row.names = 1 )
+
+
+all.nohits <- pullKmerSeqs(hits = all.hits, kmer.stringset = all.13to17)
+Ta.nohits <- pullKmerSeqs(hits = Ta.hits, kmer.stringset = Ta.13to17)
+Hv.nohits <- pullKmerSeqs(hits = Hv.hits, kmer.stringset = Hv.13to17)
+Zm.nohits <- pullKmerSeqs(hits = Zm.hits, kmer.stringset = Zm.13to17)
+Gm.nohits <- pullKmerSeqs(hits = Gm.hits, kmer.stringset = Gm.13to17)
+#hist(width(Gm.nohits))
+
+length(all.nohits)
+```
+
+* too many no-fungal-hits results across whole 1-75bp region. need to subset somehow. can either 1) focus on regions contingent across all 4 crops (redo blast or see if kmers in common across the 4 separate batches), 2) focus on the kmers that block the most sequences/ASVs from sequencing runs
+
+```{r}
+all2.hits <- read.csv("./data/kmers/all_1-18bp_kmers13-17_hits.csv", 
+                 stringsAsFactors = TRUE, row.names = 1 )
+all3.hits <- read.csv("./data/kmers/all_27-49bp_kmers13-17_hits.csv", 
+                 stringsAsFactors = TRUE, row.names = 1 )
+all2.nohits <- pullKmerSeqs(hits = all2.hits, kmer.stringset = all2.13to17)
+all3.nohits <- pullKmerSeqs(hits = all3.hits, kmer.stringset = all3.13to17)
+
+#write.csv(all2.nohits, "./data/kmers/all_1-18bp_kmers13-17_nofungalhits.csv")  #3 remaining hits
+#write.csv(all3.nohits, "./data/kmers/all_27-49bp_kmers13-17_nofungalhits.csv")  #8 remaining hits
+```
+ 
+ * fed the remaining kmers from these two batches into the PNABio 'PNA Tool' to get design specifications. All of the kmers in the 27-49kmer stretch have too much Purine/G content. 2 of 3 of the kmers in the 1-18bp stretch have good design specs and reasonable Tm's (75.1 and 78.3 degC at 4uM). 
+
+* Comparing to Nano Run's ASVs:
+    * Of the Ta ASVs from the Sept Nano Run -- ASV134, ASV146, ASV200 are the only ones that would be missed (and an addition two from JDR's nano run from 2020- ASV117 & ASV209)
+    * Of the Zm ASVs from JDR's 2020 nano run, none would be missed. 
+    * Of the Hv ASVs from the Sept Nano Run -- (only 1 ASV) none are missed. Also none would be missed from the May 2022 Nano run, where different primer batches were used.
+    * Of the Gm ASVs from JDR's 2020 nano run, (only 1 ASV) none would be missed. 
+
+* Of the BLASTed reference genome ITS sequences (aligned). 
+    * Hv 75.8% of seqs covered.
+    * Gm 98.5% of seqs covered.
+    * Zm 94.8% of seqs covered.
+    * Ta 78.2% of seqs covered.
+
+# Proposed PNAs
+```{r}
+all2.nohits <- read.csv("./data/kmers/all_1-18bp_kmers13-17_nofungalhits.csv", 
+                 stringsAsFactors = TRUE, row.names = 1)
+all2.nohits[1,]
+
+all2.nohits[3,]
+```
+
+* The two good kmers are the same + 1bp on kmer_11. kmer_11 has the higher Tm.
+
+
+# Compare Proposed PNAs to Nano Illumina Run results
+```{r}
+# load in Sept nano Illumina run phyloseq object
+load("./data/wheatBarley_ps_ids.RData")
+ps
+# load in manually curated info on extraneous plant sequences in Sept Nano Illumina run
+lowConf.ncbi <- read.csv("./data/wheatBarley_lowConfASVs.csv",
+                         row.names = 1, stringsAsFactors = TRUE)
+notFungiASVs <- droplevels(lowConf.ncbi$ASV[lowConf.ncbi$Problematic=="yes"])
+plantASVs <- droplevels(lowConf.ncbi$ASV[lowConf.ncbi$NCBI.Blast.Group=="Plant"])
+
+SbyS_all <- ps@otu_table@.Data
+totReads <- sum(colSums(ps@otu_table))
+plantASVsums <- colSums(SbyS_all[,colnames(SbyS_all) %in% plantASVs])
+
+propASVPlantReads <- c(plantASVsums/totReads); round(propASVPlantReads,6)
+propAllPlantReads <- sum(propASVPlantReads); propAllPlantReads
+
+ASVsNotCovered <- c('ASV134', 'ASV146', 'ASV200')
+
+# sum of the proportion of sequencing reads not covered by the potential PNA
+notCovered <- sum(propASVPlantReads[names(propASVPlantReads) %in% ASVsNotCovered])
+notCovered
+
+propAllPlantReads/notCovered
+```
+
+* So in summary, 35.3% of all reads from September nano Illumina Run were plant in origin (most of these are triticum and overall read count was counterbalanced by the lack of plant contamination in the decomposed corn debris samples).
+* The proposed PNAs would reduce this plant contamination down to 0.014% of the total run, or in other words a >2500-fold reduction in plant contamination.
+
+
+
+
+
+
+# End - Session Info
+```{r}
+sessionInfo()
+```

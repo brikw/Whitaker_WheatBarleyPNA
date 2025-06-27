@@ -1,0 +1,4 @@
+kmer_number,kmer_seq,Length_bp,Tm,Purine_Perc,GC_content,Design,Self_complementarity,complementarity_notes,RC
+kmer_5,CAAGTTGCGCCCG,13,75.1,46.2,69.2,Good,some,caaGttgCGCCCG,CGGGCGCAACTTG
+kmer_6,AAGTTGCGCCCGA,13,78,53.8,61.5,Redesign recommended; Purine content > 50%,none,,
+kmer_11,CAAGTTGCGCCCGA,14,78.3,50,64.3,Good,some,caaGttgCGCCCGA,TCGGGCGCAACTTG
