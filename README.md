@@ -1,7 +1,7 @@
 # "Design and validation of a Peptide Nucleic Acid clamp of barley and wheat ITS2 for fungal microbiome surveys"
 ### Whitaker, B.K.
 
-ZENODO DOI HERE
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.16116364.svg)](https://doi.org/10.5281/zenodo.16116364)
 
 This repository includes the R code, data files, and small scripts to supplement the manuscript by Whitaker "Design and validation of a Peptide Nucleic Acid clamp of barley and wheat ITS2 for fungal microbiome surveys".
 
