@@ -9,4 +9,6 @@ The Rmd file ("designPNA_ITS2.Rmd") details the workflow for designing the PNA u
 
 The /code folder contains the bash scripts for BLASTn and MAFFT, as well as the small R scripts necessary to run small codes inside the main Rmd files. Data necessary to run the analyses can be found in /data folder or in the NCBI SRA associated with the manuscript.
 
+The TapeStation results for confirmation of PNA annealing temperature are in 2022.11.17 Whitaker PNA.NoPNA PCR Test.pdf & 2022.11.18 Whitaker Reg.PCR No PNA Test.pdf (raw data), and summarized in the excel TapeStationResults_Summary.xlsx .
+
 Please see the manuscript for details and full reference information.
