@@ -25,7 +25,8 @@ This document reports on results from the Illumina Nano Run in Dec 2022, on 40 s
 ```{r, echo=FALSE, results='hide', include=FALSE} 
 
 x<-c("Biostrings", "car", "genefilter", "MASS",
-    "tidyverse", "ggplot2", "phyloseq", "vegan")
+    "tidyverse", "ggplot2", "phyloseq", "vegan",
+    "betareg", "brms", "bayesplot", "posterior") # these 4 needed for beta-reg models only
 lapply(x, require, character.only = TRUE)
 
 # require(devtools); packageVersion("devtools")               #v.‘2.4.5’
@@ -222,21 +223,152 @@ ggplot(test, aes(y = seqDepth_noPlant, x = PNA_Treatment, color = Crop.Type)) +
 
 
 ### Run Models
-```{r}
-#SbyE <- data.frame(sample_data(ps_fungi))
+```{r, echo = FALSE}
+# create a continuous variable
+test$PNA_Treatment_cont <- as.numeric(
+  ifelse(test$PNA_Treatment == "0uM", "0", 
+  ifelse(test$PNA_Treatment == "0.75uM", "0.75",
+  ifelse(test$PNA_Treatment == "1uM", "1",
+  ifelse(test$PNA_Treatment == "1.5uM", "1.5", NA)))) )
+# remove 0 boundary observations from proportion plant reads variable
+test$propPlant_01 <- test$propPlant+0.01
 
+
+# general linear model
 plant.mod1 <- lm(propPlant ~ Crop.Type*PNA_Treatment, data = test)
 car::Anova(plant.mod1, type = 2)
+#par(mfrow = c(2,2)); plot(plant.mod1); par(mfrow = c(1,1))
+# poor model fit
 
-plant.aov <- aov(propPlant ~ Crop.Type*PNA_Treatment, data = test)
-TukeyHSD(plant.aov, which= "Crop.Type") # across PNA, both corn and wheat diff from barley, but not diff from each other
-TukeyHSD(plant.aov, which= "PNA_Treatment") #across crops, 0uM differnt from any PNA trt (L,M,H), but no other trt level different from one another
-TukeyHSD(plant.aov, which = "Crop.Type:PNA_Treatment")
+# Beta regression model for proportions
+### note, regular betareg can not handle boundary observations [0,1], so extended distribution is used dist='xbetax', which has issues with testing the interaction. Added small proportion 0.01 to allow test of interaction
+plant.mod2 <- betareg(I(propPlant+0.01) ~ Crop.Type*PNA_Treatment, data = test,  
+        phi = FALSE, link = "logit", na.action = na.omit, type = "ML",
+        dist = 'beta')
+car::Anova(plant.mod2, type = 2)
+#par(mfrow = c(2,2)); plot(plant.mod2); par(mfrow = c(1,1))
+# poor model fit
+
+# plant.mod3 <- betareg(propPlant ~ Crop.Type*PNA_Treatment, data = test,  
+#         phi = FALSE, link = "logit", na.action = na.omit, type = "ML",
+#         dist = 'xbeta', nu = 0.0002)
+# #car::Anova(plant.mod3, type = 2)
+# par(mfrow = c(2,2)); plot(plant.mod3); par(mfrow = c(1,1))
+
+
+plant.mod4 <- betareg(propPlant ~ Crop.Type+PNA_Treatment_cont, data = test,  
+        phi = FALSE, link = "logit", na.action = na.omit, type = "ML",
+        dist = 'xbetax')
+car::Anova(plant.mod4, type = 2)
+#par(mfrow = c(2,2)); plot(plant.mod4); par(mfrow = c(1,1)) 
+# good fit, but no interaction tested
+
+plant.mod5 <- betareg(I(propPlant+0.01) ~ Crop.Type*PNA_Treatment_cont, data = test,  
+        phi = FALSE, link = "logit", na.action = na.omit, type = "ML",
+        dist = 'beta')
+car::Anova(plant.mod5, type = 2)
+#par(mfrow = c(2,2)); plot(plant.mod5); par(mfrow = c(1,1))
+# poor model fit
+
+# plant.mod6 <- betareg(I(propPlant+0.01) ~ Crop.Type*PNA_Treatment_cont, 
+#         data = test[test$Crop.Type != "Corn",],  
+#         phi = FALSE, link = "logit", na.action = na.omit, type = "ML",
+#         dist = 'beta')
+# car::Anova(plant.mod6, type = 2)
+# par(mfrow = c(2,2)); plot(plant.mod6); par(mfrow = c(1,1))
+# poor model fit
+
+# quasibinomial model (sometimes for proportions) ### https://www.andrewheiss.com/blog/2021/11/08/beta-regression-guide/)
+plant.mod7 <- glm(propPlant ~ Crop.Type*PNA_Treatment, data = test,
+                  family = quasibinomial())
+car::Anova(plant.mod7, type = 2)
+#par(mfrow = c(2,2)); plot(plant.mod7); par(mfrow = c(1,1))  
+# poor model fit
+```
+
+
+```{r}
+## Bayesion ZOIB (zero inflated beta regression)
+bf.mod <- bf(propPlant ~ Crop.Type*PNA_Treatment_cont,
+     zi ~ Crop.Type) #phi ~ Crop.Type*PNA_Treatment_cont)
+get_prior(
+  bf.mod,
+  data = test,
+  family = zero_inflated_beta()
+)
+# don't want all the 'flat' priors
+my.priors <- c(set_prior("student_t(3, 0, 2.5)", class = "Intercept"),
+                    #keep the default prior for the intercept
+               set_prior("normal(0, 2)", class = "b"))
+                    #but add priors for the b class
+plant.mod9 <- brm(bf.mod,
+  data = test,
+  family = zero_inflated_beta(),
+  init = 0,
+  #chains = 4, iter = 20, warmup = 10,
+  #cores = 4, seed = 217, 
+  chains = 4, iter = 2000, warmup = 1000,
+  cores = 4, seed = 217, 
+  backend = "rstan",
+  prior = my.priors,
+  file = "./data/plant.mod9"  
+)
+plant.mod9
+
+## Model convergence
+# inspect trace plots (for MCMC convergence)
+mcmc_trace(plant.mod9)  #fuzzy caterpillae, all chains mixed and yielded the same estimate + approx credible interval
+# inspect Rhats
+plant.mod9.rhats <- rhat(plant.mod9)
+mcmc_rhat(plant.mod9.rhats)  # want rhats to be as close to 1 as possible
+# compares variance w/i chains to vairance b/w chains
+# values below 1.01 are good, which all of these are < 1.005
+table(plant.mod9.rhats<1.01)
+# also there were no warnings about the bulk or Tail effective sample size (ESS), which are all above at least 1000 in this model
+# and no warnings about transitions exceeding the max. treedepth
+
+# examine estimates
+plogis(-1.35)
+# 20% increase in proportion plant reads in barley
+plogis(-1.35 + -1.80) - plogis(-1.35) 
+#16% decrease in proportion plant reads in wheat relative to barley
+# note - corn B estimate includes 0 in CI, so probably most of the information for corn is contained in the zi parm
+plogis(-1.35 + -2.87) - plogis(-1.35) 
+# 19% decrease in proportion plant reads with increase in PNA concentration of 1uM. Note - this is only true for default intercept which is barley, both the interaction terms with corn and wheat include 0 in the credible intervals
+
+plogis(-2.00)
+#12% 0s in barley (which is about accurate)
+plogis(-2.00 + 8.45) - plogis(-2.00) 
+#88% increase in 0s in corn relative to barley
+plogis(-2.00 + 3.11) - plogis(-2.00) 
+#63% increase in 0s in corn relative to barley
+
+
+# # try to include interaction
+# bf.mod2 <- bf(propPlant ~ Crop.Type*PNA_Treatment_cont,
+#               zi ~ Crop.Type*PNA_Treatment_cont) #phi ~ Crop.Type*PNA_Treatment_cont)
+# plant.mod10 <- brm(bf.mod2,
+#   data = test,
+#   family = zero_inflated_beta(),
+#   init = 0,
+#   #chains = 4, iter = 20, warmup = 10,
+#   #cores = 4, seed = 217, 
+#   chains = 4, iter = 2000, warmup = 1000,
+#   cores = 4, seed = 217, 
+#   backend = "rstan",
+#   prior = my.priors,
+#   file = "./data/plant.mod10"  
+# )
+# plant.mod10
+# # lots of warnings about low ESS, large Rhats, and transitions exceeding max treedepth
+# #mcmc_trace(plant.mod10) #looks really bad
+# # poor model convergence
 
 ```
 
 * Both crop type and PNA treatment have an effect on the proportion of plant reads contaminating a sample. 
-#  Barley 0uM worse than any other barley trt (L,M,H), and also barley 0uM worse than all corn and wheat trts (all 0,L,M,H). But, though the wheat 0uM looks higher, it is not statistically different from wheat PNA trts (L,M,H)
+*  Normal linear model implies: Barley 0uM worse than any other barley trt (L,M,H), and also barley 0uM worse than all corn and wheat trts (all 0,L,M,H). But, though the wheat 0uM looks higher, it is not statistically different from wheat PNA trts (L,M,H)
+* Bayesian regression model largely supports this lm model interpretation
 
 ```{r}
 raw.mod1 <- lm(postChimera ~ Crop.Type*PNA_Treatment, data = test)
@@ -361,9 +493,11 @@ p3 <- ggplot() + coord_equal() +
           color = Crop.Type, shape = PNA_Treatment) , size = 1.5) +
     scale_x_continuous(paste("PCoA 1 (", expl_1, "%)", sep = "")) +
     scale_y_continuous(paste("PCoA 2 (", expl_2, "%)", sep = "")) +
-  scale_color_discrete("Crop") + scale_shape_discrete("") +
-  guides(color = 'none') +
-  theme(legend.position = 'top')
+  scale_color_discrete("") + scale_shape_discrete("") +
+  guides(color = guide_legend(nrow = 2), shape = guide_legend(nrow = 2)) +
+  theme(legend.position = 'top', 
+        legend.spacing.x = unit(0.0, "cm"),
+        legend.margin = margin(0, 0, 0, 0, unit = "cm"))
 #tiff("./figures/Fig3b_cropPNA.tiff", width=3.25, height=3.25, units="in", res=300)
 p3
 #dev.off()
@@ -383,7 +517,7 @@ out2
 *Only crop type affects the community structure and shannon diversity, not PNA test (=good!)
 
 ```{r, include = FALSE}
-#tiff("./figures/Fig3_cropPNA.tiff", width=7, height=3.25, units="in", res=300)
+#tiff("./figures/Fig3_cropPNA.tiff", width=7, height=3.5, units="in", res=300)
 multiplot(p2+ggtitle("A"), p3+ggtitle("B"), cols = 2)
 #dev.off()
 
