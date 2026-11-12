@@ -329,19 +329,52 @@ table(plant.mod9.rhats<1.01)
 
 # examine estimates
 plogis(-1.35)
-# 20% increase in proportion plant reads in barley
+plogis(-2.17)
+plogis(-0.75)
+# 20.6% [CI: 10.2%,32.1%] increase in proportion plant reads in barley
 plogis(-1.35 + -1.80) - plogis(-1.35) 
-#16% decrease in proportion plant reads in wheat relative to barley
+plogis(-1.35 + -3.03) - plogis(-1.35) 
+plogis(-1.35 + -0.31) - plogis(-1.35) 
+#16.5% [CI: 4.6%,19.4%] decrease in proportion plant reads in wheat relative to barley
 # note - corn B estimate includes 0 in CI, so probably most of the information for corn is contained in the zi parm
-plogis(-1.35 + -2.87) - plogis(-1.35) 
-# 19% decrease in proportion plant reads with increase in PNA concentration of 1uM. Note - this is only true for default intercept which is barley, both the interaction terms with corn and wheat include 0 in the credible intervals
 
+plogis(-1.35 + -2.87) - plogis(-1.35) 
+plogis(-1.35 + -4.31) - plogis(-1.35) 
+plogis(-1.35 + -1.14) - plogis(-1.35) 
+# 19.1% [CI: 12.9%,20.2%] decrease in proportion plant reads with increase in PNA concentration of 1uM. Note - this is only true for default intercept which is barley, both the interaction terms with corn and wheat include 0 in the credible intervals
+
+# zi parms
 plogis(-2.00)
-#12% 0s in barley (which is about accurate)
+plogis(-4.05)
+plogis(-0.45)
+#11.9% 0s [CI: 1.7%,38.9%] in barley (which is about accurate)
 plogis(-2.00 + 8.45) - plogis(-2.00) 
-#88% increase in 0s in corn relative to barley
+plogis(-2.00 + 3.57) - plogis(-2.00) 
+plogis(-2.00 + 17.55) - plogis(-2.00) 
+#87.9% [CI: 70.9%,88.1%] increase in 0s in corn relative to barley
 plogis(-2.00 + 3.11) - plogis(-2.00) 
-#63% increase in 0s in corn relative to barley
+plogis(-2.00 + 1.06) - plogis(-2.00)
+plogis(-2.00 + 5.54) - plogis(-2.00)
+#63.3% [CI: 16.2%,85.3%] increase in 0s in wheat relative to barley
+
+
+require(marginaleffects)
+avg_comparisons(plant.mod9, variables = "Crop.Type", newdata = "mean", comparison = "difference", type = "response")
+avg_slopes(plant.mod9, variables = "PNA_Treatment_cont", by = "Crop.Type", newdata = "mean", type = "response")
+require(emmeans)
+out1 <- emtrends(plant.mod9, ~Crop.Type, var = "PNA_Treatment_cont", component = "mu", type = "response", point.est = "mean")
+contrast(out1)
+summary(out1, point.est = "mean")
+
+
+
+summary(emmeans(plant.mod9, ~Crop.Type, component = "zi", type = "response", epred = TRUE), point.est = "mean")
+
+summary(emmeans(plant.mod9, ~Crop.Type , component = "mu", type = "response", epred = TRUE), point.est = "mean")
+
+summary(emmeans(plant.mod9, ~Crop.Type | PNA_Treatment_cont, component = "response", type = "response", epred = TRUE), point.est = "mean")
+
+
 
 
 # # try to include interaction
